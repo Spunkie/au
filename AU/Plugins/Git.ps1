@@ -51,7 +51,26 @@ $message = "AU: $($packages.Length) updated - $($packages | % Name)"
 $gist_url = $Info.plugin_results.Gist -split '\n' | select -Last 1
 git commit -m "$message`n[skip ci] $gist_url" --allow-empty
 
-Write-Host "Pushing changes"
+Write-Host "Pushing Master"
 git push -q
+
+Write-Host "Merging master -> dev"
+git checkout -q dev
+git pull -q origin dev
+git merge -Xtheirs -q master
+git status
+
+Write-Host "Pushing Dev"
+git push -q
+
+Write-Host "Merging dev -> staging"
+git checkout -q staging
+git pull -q origin staging
+git merge -Xtheirs -q dev
+git status
+
+Write-Host "Pushing Staging"
+git push -q
+
 
 popd
