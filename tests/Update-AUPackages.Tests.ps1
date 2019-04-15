@@ -104,7 +104,45 @@ Describe 'Update-AUPackages' -Tag updateall {
             (gc $TestDrive\tmp_test).Count | Should be 3
         }
 
-        It 'should execute Report plugin' {
+        It 'should execute text Report plugin' {
+            gc $global:au_Root\test_package_1\update.ps1 | set content
+            $content -replace '@\{.+\}', "@{ Version = '1.3' }" | set content
+            $content | sc $global:au_Root\test_package_1\update.ps1
+
+            $Options.Report = @{
+                Type = 'text'
+                Path = "$global:au_Root\report.txt"
+            }
+
+            $res = updateall -NoPlugins:$false -Options $Options  6> $null
+
+            $pattern  = "\bFinished $pkg_no packages\b[\S\s]*"
+            $pattern += '\b1 updated\b[\S\s]*'
+            $pattern += '\b0 errors\b[\S\s]*'
+            $pattern += '\btest_package_1 +True +1\.3 +1\.2\.3\b[\S\s]*'
+            foreach ( $i in 2..$pkg_no ) {
+                $pattern += "\btest_package_$i +False +1\.2\.3 +1\.2\.3\b[\S\s]*"
+            }
+            $pattern += '\btest_package_1\b[\S\s]*'
+            $pattern += '\bnuspec version: 1\.2\.3\b[\S\s]*'
+            $pattern += '\bremote version: 1\.3\b[\S\s]*'
+            $pattern += '\bNew version is available\b[\S\s]*'
+            $pattern += '\bPackage updated\b[\S\s]*'
+            foreach ( $i in 2..$pkg_no ) {
+                $pattern += "\btest_package_$i\b[\S\s]*"
+                $pattern += '\bnuspec version: 1\.2\.3\b[\S\s]*'
+                $pattern += '\bremote version: 1\.2\.3\b[\S\s]*'
+                $pattern += '\bNo new version found\b[\S\s]*'
+            }
+            $Options.Report.Path | Should Exist
+            $Options.Report.Path | Should FileContentMatchMultiline $pattern
+        }
+
+        It 'should execute markdown Report plugin' {
+            gc $global:au_Root\test_package_1\update.ps1 | set content
+            $content -replace '@\{.+\}', "@{ Version = '1.3' }" | set content
+            $content | sc $global:au_Root\test_package_1\update.ps1
+
             $Options.Report = @{
                 Type = 'markdown'
                 Path = "$global:au_Root\report.md"
@@ -113,10 +151,26 @@ Describe 'Update-AUPackages' -Tag updateall {
 
             $res = updateall -NoPlugins:$false -Options $Options  6> $null
 
-            Test-Path $Options.Report.Path | Should Be $true
-
-            $report = gc $Options.Report.Path 
-            ($report -match "test_package_[1-3]").Count | Should Be 9
+            $pattern  = "\bFinished $pkg_no packages\b[\S\s]*"
+            $pattern += '\b1 updated\b[\S\s]*'
+            $pattern += '\b0 errors\b[\S\s]*'
+            $pattern += '\btest_package_1\b.*\bTrue\b.*\bFalse\b.*\b1\.3\b.*\b1\.2\.3\b[\S\s]*'
+            foreach ( $i in 2..$pkg_no ) {
+                $pattern += "\btest_package_$i\b.*\bFalse\b.*\bFalse\b.*\b1\.2\.3\b.*\b1\.2\.3\b[\S\s]*"
+            }
+            $pattern += '\btest_package_1\b[\S\s]*'
+            $pattern += '\bnuspec version: 1\.2\.3\b[\S\s]*'
+            $pattern += '\bremote version: 1\.3\b[\S\s]*'
+            $pattern += '\bNew version is available\b[\S\s]*'
+            $pattern += '\bPackage updated\b[\S\s]*'
+            foreach ( $i in 2..$pkg_no ) {
+                $pattern += "\btest_package_$i\b[\S\s]*"
+                $pattern += '\bnuspec version: 1\.2\.3\b[\S\s]*'
+                $pattern += '\bremote version: 1\.2\.3\b[\S\s]*'
+                $pattern += '\bNo new version found\b[\S\s]*'
+            }
+            $Options.Report.Path | Should Exist
+            $Options.Report.Path | Should FileContentMatchMultiline $pattern
         }
 
         It 'should execute RunInfo plugin' {
@@ -136,9 +190,71 @@ Describe 'Update-AUPackages' -Tag updateall {
             $info.plugin_results.RunInfo -match 'Test.MyPassword' | Should Be $true
             $info.Options.Test.MyPassword | Should Be '*****' 
         }
+
+        It 'should not execute GitReleases plugin when there are no updates' {
+            $Options.GitReleases = @{
+                ApiToken    = 'apiToken'
+                ReleaseType = 'package'
+                Force       = $true
+            }
+
+            Mock -ModuleName AU Invoke-RestMethod {}
+
+            updateall -NoPlugins:$false -Options $Options 6> $null
+
+            Assert-MockCalled -ModuleName AU Invoke-RestMethod -Exactly 0 -Scope It
+        }
+
+        It 'should execute GitReleases plugin per package when there are updates' {
+            gc $global:au_Root\test_package_1\update.ps1 | set content
+            $content -replace '@\{.+\}', "@{ Version = '1.3' }" | set content
+            $content | sc $global:au_Root\test_package_1\update.ps1
+            
+            $Options.GitReleases = @{
+                ApiToken    = 'apiToken'
+                ReleaseType = 'package'
+                Force       = $true
+            }
+
+            Mock -ModuleName AU Invoke-RestMethod {
+                return @{
+                    tag_name = 'test_package_1-1.3'
+                    assets = @(
+                        @{
+                            url = 'https://api.github.com/test_package_1.1.3.nupkg'
+                            name = 'test_package_1.1.3.nupkg'
+                        }
+                    )
+                }
+            }
+
+            updateall -NoPlugins:$false -Options $Options 6> $null
+
+            Assert-MockCalled -ModuleName AU Invoke-RestMethod -Exactly 3 -Scope It
+        }
+
+        It 'should execute GitReleases plugin per date when there are updates' {
+            gc $global:au_Root\test_package_1\update.ps1 | set content
+            $content -replace '@\{.+\}', "@{ Version = '1.3' }" | set content
+            $content | sc $global:au_Root\test_package_1\update.ps1
+            
+            $Options.GitReleases = @{
+                ApiToken    = 'apiToken'
+                ReleaseType = 'date'
+                Force       = $true
+            }
+
+            Mock -ModuleName AU Get-Date { return '2017-11-05' } -ParameterFilter { $UFormat -eq '{0:yyyy-MM-dd}' }
+            Mock -ModuleName AU Invoke-RestMethod { return @{ tag_name = '2017-11-05' } }
+
+            updateall -NoPlugins:$false -Options $Options 6> $null
+
+            Assert-MockCalled -ModuleName AU Get-Date -Exactly 1 -Scope It
+            Assert-MockCalled -ModuleName AU Invoke-RestMethod -Exactly 2 -Scope It
+        }
     }
 
-    It 'should update package with checsum verification mode' {
+    It 'should update package with checksum verification mode' {
 
         $choco_path = gcm choco.exe | % Source
         $choco_hash = Get-FileHash $choco_path -Algorithm SHA256 | % Hash
@@ -159,7 +275,7 @@ Describe 'Update-AUPackages' -Tag updateall {
         $Options.UpdateTimeout = 5
 
         $res = updateall -Options $Options 3>$null 6> $null
-        $res[0].Error -eq "Job termintated due to the 5s UpdateTimeout" | Should Be $true
+        $res[0].Error -eq "Job terminated due to the 5s UpdateTimeout" | Should Be $true
     }
 
     It 'should update all packages when forced' {

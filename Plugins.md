@@ -22,6 +22,29 @@ To set up plugin to create gist under your user name you need to give it your gi
 * To use it locally, just ensure `git push` doesn't require credentials and dont set any environment variables. 
 * To use on build server such as [[AppVeyor]], specify `$Env:username` and `$Env:password`. If you host git repository on Github its preferable to use personal access token. You can use the same token as with gist as long as _**public repo**_ scope is activated.
 
+## [GitReleases](https://github.com/majkinetor/au/blob/master/AU/Plugins/GitReleases.ps1)
+
+**Creates Github release for updated packages**.
+
+* It is recommended to add the following line `skip_tags: true` in the `appveyor.yml` file to prevent tags from being built. While it may not be necessary, this is used to prevent packages from being submitted again when `[AU]` or `[PUSH]` is being used in the commit header message.
+
+## [Gitter](https://github.com/majkinetor/au/blob/master/AU/Plugins/Gitter.ps1)
+
+**Setup project to submit gitter status**
+
+* First of all, navigate to the gitter channel you wish to have the status listed (you'll need to have permission to add integrations, and need to do it through the webpage).
+  1. Click on the icon for room settings, then select `Integrations`.
+  2. Select a `Custom` Integration
+  3. Copy the unique webhook url listed in the dialog.
+  4. Update your appveyor environment variable with your unique webhook, and set the name to `gitter_webhook`.
+  5. Navigate to the `update_all.ps1` file in your repository, and update the `$Options` hashtable with the following  
+     ```powershell
+     Gitter = @{
+       WebHookUrl = $env:gitter_webhook
+     }
+     ```
+  6. Enjoy your status updates, or frown on failures.
+
 ## [History](https://github.com/majkinetor/au/blob/master/AU/Plugins/History.ps1)
 
 **Create update history as markdown report using git log**. 
@@ -49,3 +72,14 @@ The plugin saves state of all packages in a file that can be used locally or upl
 
 Run this plugin as the last one to save all other info produced during the run in such way that it can be recreated as object.
 To load it for inspection use `$info = Import-CliXml update_info.xml`.
+
+## [Snippet](https://github.com/majkinetor/au/blob/master/AU/Plugins/Snippet.ps1)
+
+**Upload update history report to GitLab snippet**.
+
+To set up plugin to create snippet under your user name you need to give it your snippet id and authentication:
+
+* Log into https://gitlab.com/users/sign_in with the user you want to use.
+* [Create a snippet](https://gitlab.com/snippets/new) (private or not) with a title and some random content.  Grab the id at the end of it - `https://gitlab.com/snippets/{id}`. Set it as `$Env:snippet_id` environment variable.
+* Create [GitLab personal access token](https://gitlab.com/profile/personal_access_tokens) and **make sure token has _api_ scope selected**. Authenticating with username and password isn't supported for security reasons. Set it as `$Env:gitlab_api_token` environment variable.
+

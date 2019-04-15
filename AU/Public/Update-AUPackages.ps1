@@ -1,5 +1,6 @@
-# Author: Miodrag Milic <miodrag.milic@gmail.com>
-# Last Change: 02-Dec-2016.
+
+ # Author: Miodrag Milic <miodrag.milic@gmail.com>
+ # Last Change: 08-May-2018
 
 <#
 .SYNOPSIS
@@ -47,8 +48,10 @@ function Update-AUPackages {
           UpdateTimeout     - Timeout for background job in seconds, by default 1200 (20 minutes).
           Force             - Force package update even if no new version is found.
           Push              - Set to true to push updated packages to Chocolatey community repository.
+          PushAll           - Set to true to push all updated packages and not only the most recent one per folder.
           WhatIf            - Set to true to set WhatIf option for all packages.
           PluginPath        - Additional path to look for user plugins. If not set only module integrated plugins will work
+          NoCheckChocoVersion  - Set to true to set NoCheckChocoVersion option for all packages.
 
           Plugin            - Any HashTable key will be treated as plugin with the same name as the option name.
                               A script with that name will be searched for in the AU module path and user specified path.
@@ -81,6 +84,7 @@ function Update-AUPackages {
     if (!$Options.Force)        { $Options.Force         = $false }
     if (!$Options.Push)         { $Options.Push          = $false }
     if (!$Options.PluginPath)   { $Options.PluginPath    = '' }
+    if (!$Options.NoCheckChocoVersion){ $Options.NoCheckChocoVersion	= $false }
 
     Remove-Job * -force #remove any previously run jobs
 
@@ -91,6 +95,7 @@ function Update-AUPackages {
     $aup = Get-AUPackages $Name
     Write-Host 'Updating' $aup.Length  'automatic packages at' $($startTime.ToString("s") -replace 'T',' ') $(if ($Options.Force) { "(forced)" } else {})
     Write-Host 'Push is' $( if ($Options.Push) { 'enabled' } else { 'disabled' } )
+    Write-Host 'NoCheckChocoVersion is' $( if ($Options.NoCheckChocoVersion) { 'enabled' } else { 'disabled' } )
     if ($Options.Force) { Write-Host 'FORCE IS ENABLED. All packages will be updated' }
 
     $script_err = 0
@@ -124,22 +129,25 @@ function Update-AUPackages {
                         $pkg.Ignored = $true
                         $pkg.IgnoreMessage = $pkg.Result[-1]
                     } elseif ($job.State -eq 'Stopped') {
-                        $pkg.Error = "Job termintated due to the $($Options.UpdateTimeout)s UpdateTimeout"
+                        $pkg.Error = "Job terminated due to the $($Options.UpdateTimeout)s UpdateTimeout"
                     } else {
                         $pkg.Error = 'Job returned no object, Vector smash ?'
                     }
+                } else {
+                    $pkg = [AUPackage]::new($pkg)
                 }
 
-
-                $message = $pkg.Name + ' '
+                $jobseconds = ($job.PSEndTime.TimeOfDay - $job.PSBeginTime.TimeOfDay).TotalSeconds
+                $message = "[$($p)/$($aup.length)] " + $pkg.Name + ' '
                 $message += if ($pkg.Updated) { 'is updated to ' + $pkg.RemoteVersion } else { 'has no updates' }
                 if ($pkg.Updated -and $Options.Push) {
                     $message += if (!$pkg.Pushed) { ' but push failed!' } else { ' and pushed'}
                 }
                 if ($pkg.Error) {
-                    $message = "$($pkg.Name) ERROR: "
+                    $message = "[$($p)/$($aup.length)] $($pkg.Name) ERROR: "
                     $message += $pkg.Error.ToString() -split "`n" | % { "`n" + ' '*5 + $_ }
                 }
+                $message+= " ({0:N2}s)" -f $jobseconds
                 Write-Host '  ' $message
 
                 $result += $pkg
@@ -162,6 +170,38 @@ function Update-AUPackages {
         $package_name = Split-Path $package_path -Leaf
         Write-Verbose "Starting $package_name"
         Start-Job -Name $package_name {         #TODO: fix laxxed variables in job for BE and AE
+            function repeat_ignore([ScriptBlock] $Action) { # requires $Options
+                $run_no = 0
+                $run_max = if ($Options.RepeatOn) { if (!$Options.RepeatCount) { 2 } else { $Options.RepeatCount+1 } } else {1}
+
+                :main while ($run_no -lt $run_max) {
+                    $run_no++
+                    try {
+                        $res = & $Action 6> $out
+                        break main
+                    } catch {
+                        if ($run_no -ne $run_max) {
+                            foreach ($msg in $Options.RepeatOn) { 
+                                if ($_.Exception -notlike "*${msg}*") { continue }
+                                Write-Warning "Repeating $using:package_name ($run_no): $($_.Exception)"
+                                if ($Options.RepeatSleep) { Write-Warning "Sleeping $($Options.RepeatSleep) seconds before repeating"; sleep $Options.RepeatSleep }
+                                continue main
+                            }
+                        }
+                        foreach ($msg in $Options.IgnoreOn) { 
+                            if ($_.Exception -notlike "*${msg}*") { continue }
+                            Write-Warning "Ignoring $using:package_name ($run_no): $($_.Exception)"
+                            "AU ignored on: $($_.Exception)" | Out-File -Append $out
+                            $res = 'ignore'
+                            break main
+                        }
+                        $type = if ($res) { $res.GetType() }
+                        if ( "$type" -eq 'AUPackage') { $res.Error = $_ } else { return $_ }
+                    }
+                }
+                $res
+            }
+
             $Options = $using:Options
 
             cd $using:package_path
@@ -171,42 +211,15 @@ function Update-AUPackages {
             $global:au_Force   = $Options.Force
             $global:au_WhatIf  = $Options.WhatIf
             $global:au_Result  = 'pkg'
+            $global:au_NoCheckChocoVersion = $Options.NoCheckChocoVersion
 
             if ($Options.BeforeEach) {
                 $s = [Scriptblock]::Create( $Options.BeforeEach )
                 . $s $using:package_name $Options
             }
             
-            $run_no = 0
-            $run_max = $Options.RepeatCount
-            $run_max = if ($Options.RepeatOn) { if (!$Options.RepeatCount) { 2 } else { $Options.RepeatCount+1 } } else {1}
-
-            :main while ($run_no -lt $run_max) {
-                $run_no++
-                $pkg = $null #test double report when it fails
-                try {
-                    $pkg = ./update.ps1 6> $out
-                    break main
-                } catch {
-                    if ($run_no -ne $run_max) {
-                        foreach ($msg in $Options.RepeatOn) { 
-                            if ($_.Exception -notlike "*${msg}*") { continue }
-                            Write-Warning "Repeating $using:package_name ($run_no): $($_.Exception)"
-                            if ($Options.RepeatSleep) { Write-Warning "Sleeping $($Options.RepeatSleep) seconds before repeating"; sleep $Options.RepeatSleep }
-                            continue main
-                        }
-                    }
-                    foreach ($msg in $Options.IgnoreOn) { 
-                        if ($_.Exception -notlike "*${msg}*") { continue }
-                        "AU ignored on: $($_.Exception)" | Out-File -Append $out
-                        $pkg = 'ignore'
-                        break main
-                    }
-                    if ($pkg) { $pkg.Error = $_ }
-                }
-            } 
+            $pkg = repeat_ignore { ./update.ps1 }
             if (!$pkg) { throw "'$using:package_name' update script returned nothing" }
-
             if (($pkg -eq 'ignore') -or ($pkg[-1] -eq 'ignore')) { return 'ignore' }
 
             $pkg  = $pkg[-1]
@@ -214,20 +227,26 @@ function Update-AUPackages {
             if ( "$type" -ne 'AUPackage') { throw "'$using:package_name' update script didn't return AUPackage but: $type" }
 
             if ($pkg.Updated -and $Options.Push) {
-                $pkg.Result += $r = Push-Package
-                if ($LastExitCode -eq 0) {
-                    $pkg.Pushed = $true
-                } else {
-                    $pkg.Error = "Push ERROR`n" + ($r | select -skip 1)
+                $res = repeat_ignore { 
+                    $r = Push-Package -All:$Options.PushAll
+                    if ($LastExitCode -eq 0) { return $r } else { throw $r }
                 }
-            }
+                if (($res -eq 'ignore') -or ($res[-1] -eq 'ignore')) { return 'ignore' }
 
+                if ($res -is [System.Management.Automation.ErrorRecord]) {
+                    $pkg.Error = "Push ERROR`n" + $res
+                } else {
+                    $pkg.Pushed = $true 
+                    $pkg.Result += $res 
+                } 
+            }
+            
             if ($Options.AfterEach) {
                 $s = [Scriptblock]::Create( $Options.AfterEach )
                 . $s $using:package_name $Options
             }
 
-            $pkg
+            $pkg.Serialize()
         } | Out-Null
     }
     $result = $result | sort Name

@@ -27,6 +27,7 @@ Describe 'Update-Package' -Tag update {
         $global:au_NoCheckChocoVersion = $true
         $global:au_ChecksumFor         = 'none'
         $global:au_WhatIf              = $false
+        $global:au_NoReadme            = $false
 
         rv -Scope global Latest -ea ignore
         'BeforeUpdate', 'AfterUpdate' | % { rm "Function:/au_$_" -ea ignore }
@@ -37,7 +38,26 @@ Describe 'Update-Package' -Tag update {
     InModuleScope AU {
 
         Context 'Updating' {
-             It 'can backup and restore using WhatIf' {
+
+            It 'can set description from README.md' {
+                $readme = 'dummy readme & test'
+                '','', $readme | Out-File $TestDrive\test_package\README.md
+                $res = update
+
+                $res.Result -match 'Setting package description from README.md' | Should Be $true
+                (nuspec_file).package.metadata.description.InnerText.Trim() | Should Be $readme
+            }
+
+            It 'does not set description from README.md with NoReadme parameter' {
+                $readme = 'dummy readme & test'
+                '','', $readme | Out-File $TestDrive\test_package\README.md
+                $res = update -NoReadme
+
+                $res.Result -match 'Setting package description from README.md' | Should BeNullOrEmpty
+                (nuspec_file).package.metadata.description | Should Be 'This is a test package for Pester'
+            }
+
+            It 'can backup and restore using WhatIf' {
                 get_latest -Version 1.2.3
                 $global:au_Force = $true; $global:au_Version = '1.0'
                 $global:au_WhatIf = $true
@@ -193,24 +213,24 @@ Describe 'Update-Package' -Tag update {
 
             It 'sets Force parameter from global variable au_Force if it is not bound' {
                 $global:au_Force = $true
-                $msg = "Parameter Force set from global variable au_Force: $au_Force"
+                $filter_msg = "Parameter Force set from global variable au_Force: $au_Force"
                 update -Verbose
-                Assert-MockCalled Write-Verbose -ParameterFilter { $Message -eq $msg }
+                Assert-MockCalled Write-Verbose -ParameterFilter { $Message -eq $filter_msg }
 
             }
 
             It "doesn't set Force parameter from global variable au_Force if it is bound" {
                 $global:au_Force = $true
-                $msg = "Parameter Force set from global variable au_Force: $au_Force"
+                $filter_msg = "Parameter Force set from global variable au_Force: $au_Force"
                 update -Verbose -Force:$false
-                Assert-MockCalled Write-Verbose -ParameterFilter { $Message -ne $msg }
+                Assert-MockCalled Write-Verbose -ParameterFilter { $Message -ne $filter_msg }
             }
 
             It 'sets Timeout parameter from global variable au_Timeout if it is not bound' {
                 $global:au_Timeout = 50
-                $msg = "Parameter Timeout set from global variable au_Timeout: $au_Timeout"
+                $filter_msg = "Parameter Timeout set from global variable au_Timeout: $au_Timeout"
                 update -Verbose
-                Assert-MockCalled Write-Verbose -ParameterFilter { $Message -eq $msg }
+                Assert-MockCalled Write-Verbose -ParameterFilter { $Message -eq $filter_msg }
             }
 
         }
@@ -234,7 +254,7 @@ Describe 'Update-Package' -Tag update {
 
                 update *> $null
 
-                $global:Latest.NuspecVersion | Should Be 0.0
+                $global:Latest.NuspecVersion | Should Be '0.0'
             }
         }
 
@@ -256,6 +276,51 @@ Describe 'Update-Package' -Tag update {
             It "rethrows if au_GetLatest throws" {
                 function global:au_GetLatest { throw 'test' }
                 { update } | Should Throw "test"
+            }
+
+            It 'checks values in $Latest when entering au_GetLatest' {
+                function global:au_GetLatest {
+                    $Latest.Count       | Should Be 1
+                    $Latest.PackageName | Should Be 'test_package'
+                    @{ Version = '1.2' }
+                }
+                update
+            }
+
+            It 'supports returning custom values' {
+                function global:au_GetLatest { @{ Version = '1.2'; NewValue = 1 } }
+                update
+                $global:Latest.NewValue | Should Be 1
+            }
+
+            It 'supports adding values to $global:Latest' {
+                function global:au_GetLatest { $global:Latest += @{ NewValue = 1 }; @{ Version = '1.2' } }
+                update
+                $global:Latest.NewValue | Should Be 1
+            }
+
+            It 'supports adding values to $Latest' {
+                function global:au_GetLatest { $Latest.NewValue = 1; @{ Version = '1.2' } }
+                update
+                $global:Latest.NewValue | Should Be 1
+            }
+
+            $testCases = @(
+                @{ Version = '1.2'; Type = [string] }
+                @{ Version = [AUVersion] '1.2'; Type = [AUVersion] }
+                @{ Version = [version] '1.2'; Type = [version] }
+                @{ Version = [regex]::Match('1.2', '^(.+)$').Groups[1]; Type = [string] }
+            )
+
+            It 'supports various Version types' -TestCases $testCases { param($Version)
+                function global:au_GetLatest { @{ Version = $Version } }
+                { update } | Should Not Throw
+            }
+
+            It 'supports various Version types when forcing update' -TestCases $testCases { param($Version, $Type)
+                function global:au_GetLatest { @{ Version = $Version } }
+                function global:au_BeforeUpdate { $Latest.Version | Should BeOfType $Type }
+                { update -Force } | Should Not Throw
             }
         }
 

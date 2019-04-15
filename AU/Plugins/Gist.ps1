@@ -2,12 +2,10 @@
 # Last Change: 10-Nov-2016.
 <#
 .SYNOPSIS
-    Create update history as markdown report using git commit log.
+    Upload files to Github gist platform.
 
 .DESCRIPTION
-   Shows one date per line and all of the packages pushed to the Chocolatey community repository during that day.
-   First letter of the package name links to report (produced by the Report plugin), the rest links to actuall
-   commit (produced by the Git plugin).
+    Plugin uploads one or more local files to the gist with the given id
 #>
 param(
     $Info,
@@ -40,6 +38,10 @@ ls $Path | % {
 }
 
 # request
+
+#https://github.com/majkinetor/au/issues/142
+[System.Net.ServicePointManager]::SecurityProtocol = 3072 -bor 768 -bor [System.Net.SecurityProtocolType]::Tls -bor [System.Net.SecurityProtocolType]::Ssl3
+
 $uri  = 'https://api.github.com/gists'
 $params = @{
     ContentType = 'application/json'
@@ -48,11 +50,15 @@ $params = @{
     Body        = $gist | ConvertTo-Json
     UseBasicparsing = $true
 }
+
+#$params | ConvertTo-Json -Depth 100 | Write-Host
+
 if ($ApiKey) {
     $params.Headers = @{
         Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($ApiKey))
     }
 }
+
 $res = iwr @params
 
 #https://api.github.com/gists/a700c70b8847b29ebb1c918d47ee4eb1/211bac4dbb707c75445533361ad12b904c593491

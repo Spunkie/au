@@ -2,8 +2,46 @@
 
 ## Next
 
+- `Get-RemoteChecksum`: New parameter `Headers`
+- Plugins:
+  - New plugin: Gitter
+  - New plugin: Snippet
+
+### Bugfixes
+  
+  - Fixed header handling during request ([#164](https://github.com/majkinetor/au/issues/164))
+  - Push errors are not repeated or ignored on ([#175](https://github.com/majkinetor/au/issues/175))
+
+## 2018.5.18
+
+- `Update-Package`: 
+  - Now you can pass HTTP/HTTPS headers to `$Latest.Options.Headers` to avoid `Unauthorized` errors while checking URLs.
+  - Package Gallery URL is no longer hard-coded but taken from the `$au_GalleryUrl` if it exists ([#95](https://github.com/majkinetor/au/issues/95))
+- `Update-AUPackages`: Added `NoCheckChocoVersion` option.
+- Plugins:
+  - `Git`: Added `Branch` parameter to specify a branch name
+  - `Mail`: Added `From` parameter to be used with mail servers that do not allow non-existent email addresses.
+
+### Bugfixes
+
+- `Gist` plugin: Security protocol is set according to updated [Github requirements](https://githubengineering.com/crypto-removal-notice).
+- `Get-RemoteFiles`: Fixed wrong checksum type being set on 64bit url
+
+## 2018.1.11
+- `Update-AuPackage`
+  - New feature [streams](https://github.com/majkinetor/au#streams) that extends `au_GetLatest` with option to return multiple HashTables (one for each stream).
+  - New parameter `IncludeStream` to force update of specific stream.
+- `au_BeforeUpdate` and `au_AfterUpdate` now have parameter `Package` of type `[AUPackage]` which you can use among other things to modify the Nuspec data.
+- Added new function `Set-DescriptionFromReadme` that is called automatically when README.md is present in the package folder ([#85](https://github.com/majkinetor/au/issues/85)). See [documentation](README.md#automatic-package-description-from-readmemd).
+- Plugins:
+  - New plugin: [GitReleases](https://github.com/majkinetor/au/blob/master/AU/Plugins/GitReleases.ps1) creates Github release on successifully pushed packages.
+  - Git: new parameter `Strategy` with options on how to commit repository changes
+  - Report: symbols in markdown report to mark embedded and stream packages
+
+## 2017.8.30
+
 - `Update-AUPackages` 
-  - New options to handle update.ps1 errors: `IgnoreOn`, `RepeatOn`,`RepeatCount`,`RepeatSleep`. See [documentation](https://github.com/majkinetor/au#handling-update-errors). ([#76](https://github.com/majkinetor/au/issues/76))
+  - New options to handle update.ps1 errors: `IgnoreOn`, `RepeatOn`,`RepeatCount`,`RepeatSleep`. See [documentation](https://github.com/majkinetor/au#handling-update-errors). ([#76](https://github.com/majkinetor/au/issues/76)).
   - New option `WhatIf` option that will trigger WhatIf on all packages.
   - New AUPackage properties: `Ignored` (boolean) and `IgnoreMessage`.
   - Report plugin: `IgnoreMessage` is added in the ignore section.

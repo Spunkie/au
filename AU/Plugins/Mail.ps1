@@ -4,6 +4,7 @@
 param(
     $Info,
     [string]   $To,
+    [string]   $From,
     [string]   $Server,
     [string]   $UserName,
     [string]   $Password,
@@ -20,10 +21,11 @@ if (($Info.error_count.total -eq 0) -and !$SendAlways) {
     return
 }
 
-$errors_word = if ($Info.error_count.total -eq 1) {'error'} else {'errors' }
+$errors_word = if ($Info.error_count.total -eq 1) { 'error' } else { 'errors' }
 
 # Create mail message
-$from = "Update-AUPackages@{0}.{1}" -f $Env:UserName, $Env:ComputerName
+
+if (!$From) { $From = "Update-AUPackages@{0}.{1}" -f $Env:UserName, $Env:ComputerName }
 
 $msg = New-Object System.Net.Mail.MailMessage $from, $To
 $msg.IsBodyHTML = $true

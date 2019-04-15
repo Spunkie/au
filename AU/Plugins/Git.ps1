@@ -12,8 +12,18 @@ param(
     # Git password. You can use Github Token here if you omit username.
     [string] $Password,
 
-    #Force git commit when package is updated but not pushed.
-    [switch] $Force
+    # Force git commit when package is updated but not pushed.
+    [switch] $Force,
+
+    # Commit strategy: 
+    #  single    - 1 commit with all packages
+    #  atomic    - 1 commit per package    
+    #  atomictag - 1 commit and tag per package
+    [ValidateSet('single', 'atomic', 'atomictag')]
+    [string]$commitStrategy = 'atomic',
+
+    # Branch name
+    [string]$Branch = 'master'
 )
 
 [array]$packages = if ($Force) { $Info.result.updated } else { $Info.result.pushed }
@@ -39,38 +49,44 @@ if ($User -and $Password) {
 }
 
 Write-Host "Executing git pull"
-git checkout -q master
-git pull -q origin master
-
-Write-Host "Adding updated packages to git repository: $( $packages | % Name)"
-$packages | % { git add -u $_.Path }
-git status
-
-Write-Host "Commiting"
-$message = "AU: $($packages.Length) updated - $($packages | % Name)"
-$gist_url = $Info.plugin_results.Gist -split '\n' | select -Last 1
-git commit -m "$message`n[skip ci] $gist_url" --allow-empty
-
-Write-Host "Pushing Master"
-git push -q
-
-Write-Host "Merging master -> dev"
-git checkout -q dev
-git pull -q origin dev
-git merge -Xtheirs -q master
-git status
-
-Write-Host "Pushing Dev"
-git push -q
-
-Write-Host "Merging dev -> staging"
-git checkout -q staging
-git pull -q origin staging
-git merge -Xtheirs -q dev
-git status
-
-Write-Host "Pushing Staging"
-git push -q
+git checkout -q $Branch
+git pull -q origin $Branch
 
 
+if  ($commitStrategy -like 'atomic*') {
+    $packages | % {
+        Write-Host "Adding update package to git repository: $($_.Name)"
+        git add -u $_.Path
+        git status
+
+        Write-Host "Commiting $($_.Name)"
+        $message = "AU: $($_.Name) upgraded from $($_.NuspecVersion) to $($_.RemoteVersion)"
+        $gist_url = $Info.plugin_results.Gist -split '\n' | select -Last 1
+        $snippet_url = $Info.plugin_results.Snippet -split '\n' | select -Last 1
+        git commit -m "$message`n[skip ci] $gist_url $snippet_url" --allow-empty
+
+        if ($commitStrategy -eq 'atomictag') {
+          $tagcmd = "git tag -a $($_.Name)-$($_.RemoteVersion) -m '$($_.Name)-$($_.RemoteVersion)'"
+          Invoke-Expression $tagcmd
+        }
+    }
+}
+else {
+    Write-Host "Adding updated packages to git repository: $( $packages | % Name)"
+    $packages | % { git add -u $_.Path }
+    git status
+
+    Write-Host "Commiting"
+    $message = "AU: $($packages.Length) updated - $($packages | % Name)"
+    $gist_url = $Info.plugin_results.Gist -split '\n' | select -Last 1
+    $snippet_url = $Info.plugin_results.Snippet -split '\n' | select -Last 1
+    git commit -m "$message`n[skip ci] $gist_url $snippet_url" --allow-empty
+
+}
+Write-Host "Pushing changes"
+git push -q 
+if ($commitStrategy -eq 'atomictag') {
+    write-host 'Atomic Tag Push'
+    git push -q --tags
+}
 popd
